@@ -114,7 +114,9 @@ function Item() {
             ))}
           </div>
           <p className="mt-2 text-sm text-muted">
-            目安: {life.expected.wears}回 または {life.expected.years}年（{subCategoryById(item.subCategory)?.label}・素材を考慮）
+            {subCategoryById(item.subCategory)?.label}の目安は{life.expected.wears}回か{life.expected.years}年です。
+            <br />
+            素材によって調整しています。
           </p>
         </div>
       </Card>
@@ -123,13 +125,13 @@ function Item() {
       <SectionTitle icon="🏷️">タグの情報</SectionTitle>
       <Card>
         <dl className="grid grid-cols-2 gap-4 text-base">
-          <div>
+          <div className="col-span-2">
             <dt className="text-sm text-muted">カテゴリ</dt>
             <dd className="font-bold">
               {CATEGORY_LABEL[item.category]} / {subCategoryById(item.subCategory)?.label}
             </dd>
           </div>
-          <div>
+          <div className="col-span-2">
             <dt className="text-sm text-muted">色・サイズ感</dt>
             <dd className="font-bold">
               {c.label} / {FITS.find((f) => f.id === item.fit)?.label}

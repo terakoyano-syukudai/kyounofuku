@@ -11,7 +11,7 @@ export type DayProposal = {
   ctx: DayContext;
   outfit: Outfit;
   alternatives: Outfit[];
-  headline: string;
+  headline: { main: string[]; note: string | null };
   advice: SlotAdvice[];
   gaps: Gap[];
   brandProfile: BrandProfile;

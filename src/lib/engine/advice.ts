@@ -6,7 +6,7 @@ import type { Outfit } from "./outfit";
 
 /** 例:「ネイビーのカーディガン」 */
 export const itemLabel = (i: WardrobeItem) => `${colorById(i.color).label}の${subCategoryById(i.subCategory)?.label ?? "アイテム"}`;
-const shortLabel = (i: WardrobeItem) => `${colorById(i.color).label}${subCategoryById(i.subCategory)?.label ?? ""}`;
+const shortLabel = (i: WardrobeItem) => `${colorById(i.color).label}の${subCategoryById(i.subCategory)?.label ?? "服"}`;
 
 export type SlotAdvice = {
   period: Period;
@@ -95,15 +95,17 @@ export function buildSlotAdvice(ctx: DayContext, o: Outfit): SlotAdvice[] {
 }
 
 /** 例:「白Tシャツ × 黒スラックス、朝晩はネイビーカーディガン」 */
-export function buildHeadline(o: Outfit, advice: SlotAdvice[]): string {
-  const main = [o.top, o.bottom].filter((x): x is WardrobeItem => !!x).map(shortLabel).join(" × ") || "服を登録してください";
-  if (!o.outer) return main;
+/** 見出し: 主役の組み合わせ（main）と、羽織りの使い方（note）を分けて返す（別の行に表示して改行を自然にする） */
+export function buildHeadline(o: Outfit, advice: SlotAdvice[]): { main: string[]; note: string | null } {
+  const main = [o.top, o.bottom].filter((x): x is WardrobeItem => !!x).map(shortLabel);
+  if (!main.length) return { main: ["服を登録してください"], note: null };
+  if (!o.outer) return { main, note: null };
   const need = advice.filter((a) => a.layer === "outer_on" && a.sceneLabel).map((a) => a.label);
   const allActive = advice.filter((a) => a.sceneLabel);
-  if (need.length === 0) return `${main}、念のため${shortLabel(o.outer)}`;
-  if (need.length === allActive.length) return `${shortLabel(o.outer)} + ${main}`;
+  if (need.length === 0) return { main, note: `念のため${shortLabel(o.outer)}を持っていく` };
+  if (need.length === allActive.length) return { main, note: `1日を通して${shortLabel(o.outer)}を羽織る` };
   const when = need.length === 2 && need.includes("朝") && need.includes("夜") ? "朝晩" : need.join("・");
-  return `${main}、${when}は${shortLabel(o.outer)}`;
+  return { main, note: `${when}は${shortLabel(o.outer)}を羽織る` };
 }
 
 export type Reason = { icon: string; title: string; text: string };

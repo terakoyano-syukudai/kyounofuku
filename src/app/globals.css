@@ -61,45 +61,32 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* スライダーをタップしやすく */
-input[type="range"] {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 32px;
-  background: transparent;
-}
-input[type="range"]::-webkit-slider-runnable-track {
-  height: 6px;
-  border-radius: 999px;
-  background: var(--surface-2);
-}
-input[type="range"]::-moz-range-track {
-  height: 6px;
-  border-radius: 999px;
-  background: var(--surface-2);
-}
-input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 26px;
-  height: 26px;
-  margin-top: -10px;
-  border-radius: 999px;
-  background: var(--accent);
-  border: 3px solid var(--surface);
-  box-shadow: 0 1px 4px rgb(0 0 0 / 0.25);
-}
-input[type="range"]::-moz-range-thumb {
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
-  background: var(--accent);
-  border: 3px solid var(--surface);
-}
-
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-.no-scrollbar {
-  scrollbar-width: none;
+/*
+ * 日本語の改行を自然にする
+ * - auto-phrase: 文字単位ではなく文節（「購入から／約2.5年」）で折り返す（lang="ja" が必要）
+ * - line-break: strict: 「ー」「ッ」や閉じ括弧が行頭に来ないようにする（禁則処理）
+ * - overflow-wrap: 入りきらない長い語だけは、はみ出さずに折り返す
+ * - text-wrap-style: pretty: 最後の行に1〜2文字だけ残る「泣き別れ」を避ける
+ * base レイヤーに置き、whitespace-nowrap などのユーティリティで上書きできるようにする
+ */
+@layer base {
+  body {
+    word-break: auto-phrase;
+    line-break: strict;
+    overflow-wrap: break-word;
+  }
+  p,
+  li,
+  dd,
+  dt,
+  summary,
+  label,
+  span {
+    text-wrap-style: pretty;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap-style: balance;
+  }
 }

@@ -114,7 +114,7 @@ function Today() {
 
       {/* ① 今日のコーデ */}
       <SectionTitle icon="①">{date === today ? "今日" : "明日"}のおすすめコーデ</SectionTitle>
-      <Card className="p-5">
+      <Card className="px-4 py-5">
         {items.length === 0 ? (
           <div className="space-y-3">
             <p className="text-xl font-black leading-tight">まずは手持ちの服を登録しましょう</p>
@@ -126,7 +126,16 @@ function Today() {
           </div>
         ) : (
           <>
-            <p className="text-2xl font-black leading-snug">{proposal.headline}</p>
+            {/* 組み合わせは「×」ごとに区切り、各アイテム名の途中では改行しない */}
+            <p className="text-2xl font-black leading-snug">
+              {proposal.headline.main.map((m, i) => (
+                <span key={m}>
+                  {i > 0 && <span className="mx-1 text-muted">×</span>}
+                  <span className="inline-block">{m}</span>
+                </span>
+              ))}
+            </p>
+            {proposal.headline.note && <p className="mt-1.5 text-lg font-bold text-accent">🧥 {proposal.headline.note}</p>}
             <div className="mt-4">
               <OutfitColorBlocks outfit={proposal.outfit} />
             </div>
@@ -137,7 +146,7 @@ function Today() {
                 <div className="flex min-h-[52px] items-center justify-center rounded-2xl bg-surface-2 text-sm text-muted">明日の予報で提案しています</div>
               )}
               {proposal.alternatives.length > 1 && (
-                <Link href={altHref} className="flex min-h-[52px] items-center justify-center rounded-2xl border-2 border-line px-3 text-base font-bold">
+                <Link href={altHref} className="flex min-h-[52px] items-center justify-center whitespace-nowrap rounded-2xl border-2 border-line px-3 text-base font-bold">
                   🔄 別の案 {alt + 1}/{proposal.alternatives.length}
                 </Link>
               )}

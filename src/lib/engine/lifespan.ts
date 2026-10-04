@@ -63,7 +63,8 @@ export type LifeInfo = {
   ageRatio: number | null;
   used: number; // 0〜（1 で目安に到達）
   status: LifeStatus;
-  reason: string; // どちらの基準で判断したか
+  reason: string; // どちらの基準で判断したか（例: 購入から約2.5年）
+  basis: { subject: string; value: string }; // 比べた目安（例: 「キャンバススニーカーの」「目安は2年」）
 };
 
 /** 指定日までの年数（小数） */
@@ -79,9 +80,10 @@ export function lifeInfo(item: WardrobeItem, wearCount: number, today: string): 
   const label = subCategoryById(item.subCategory)?.label ?? "この服";
   const byAge = ageRatio != null && ageRatio >= wearRatio;
   const reason = byAge
-    ? `購入から約${ageYears! < 0.95 ? `${Math.max(1, Math.round(ageYears! * 12))}か月` : `${Math.round(ageYears! * 10) / 10}年`}（${label}の目安 ${expected.years}年）`
-    : `${wearCount}回着用（${label}の目安 ${expected.wears}回）`;
-  return { wearCount, ageYears, expected, wearRatio, ageRatio, used, status, reason };
+    ? `購入から約${ageYears! < 0.95 ? `${Math.max(1, Math.round(ageYears! * 12))}か月` : `${Math.round(ageYears! * 10) / 10}年`}`
+    : `${wearCount}回着用`;
+  const basis = { subject: `${label}の`, value: byAge ? `目安は${expected.years}年` : `目安は${expected.wears}回` };
+  return { wearCount, ageYears, expected, wearRatio, ageRatio, used, status, reason, basis };
 }
 
 export const LIFE_STATUS_LABEL: Record<LifeStatus, string> = {

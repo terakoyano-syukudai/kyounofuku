@@ -7,7 +7,7 @@ import type { WardrobeItem } from "@/lib/types";
 import { inkOn } from "../ui";
 
 /** 服の見た目: 写真があれば写真、なければ色ブロック */
-export function ItemThumb({ item, className = "h-24" }: { item: WardrobeItem; className?: string }) {
+export function ItemThumb({ item, className = "h-24", label = true }: { item: WardrobeItem; className?: string; label?: boolean }) {
   const photo = usePhoto(item.id, item.hasPhoto);
   const c = colorById(item.color);
   if (photo) {
@@ -16,7 +16,7 @@ export function ItemThumb({ item, className = "h-24" }: { item: WardrobeItem; cl
   }
   return (
     <div className={`flex w-full items-end p-2 text-sm font-bold ${className}`} style={{ background: c.hex, color: inkOn(c.hex) }}>
-      {subCategoryById(item.subCategory)?.label}
+      {label && subCategoryById(item.subCategory)?.label}
     </div>
   );
 }
@@ -42,7 +42,17 @@ export function LifeMeter({ life, compact = false }: { life: LifeInfo; compact?:
       <div className="mt-1 h-2 overflow-hidden rounded-full bg-surface-2" role="meter" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="買い替え目安までの使用度">
         <div className={`h-full rounded-full ${t.bar}`} style={{ width: `${pct}%` }} />
       </div>
-      {!compact && <p className="mt-1 text-sm text-muted">{life.reason}</p>}
+      {!compact && (
+        <p className="mt-1 text-sm">
+          <b>{life.reason}</b>
+          <br />
+          {/* 「目安は2年」は途中で改行しない */}
+          <span className="text-muted">
+            {life.basis.subject}
+            <span className="whitespace-nowrap">{life.basis.value}</span>
+          </span>
+        </p>
+      )}
     </div>
   );
 }

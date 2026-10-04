@@ -30,7 +30,7 @@ export default function WardrobePage() {
 
   return (
     <div>
-      <PageHeader title="クローゼット" description={`登録した服 ${items.length}着。タップすると詳細（着た回数・購入時期）を見られます。`} />
+      <PageHeader title="クローゼット" description={`登録した服は${items.length}着です。服をタップすると、着た回数や購入時期を見られます。`} />
 
       <Link href="/wardrobe/add/" className="flex min-h-16 items-center justify-center gap-2 rounded-2xl bg-accent text-lg font-bold text-accent-ink shadow-sm">
         ＋ 服を登録する（写真・タグ）
@@ -58,13 +58,13 @@ export default function WardrobePage() {
                   <Card className="p-3">
                     <Link href={`/wardrobe/item/?id=${i.id}`} className="flex gap-3">
                       <div className="w-20 shrink-0 overflow-hidden rounded-xl">
-                        <ItemThumb item={i} className="h-20" />
+                        <ItemThumb item={i} className="h-20" label={false} />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-base font-bold">
+                        <p className="line-clamp-2 text-base font-bold leading-snug">
                           {colorById(i.color).label}の{subCategoryById(i.subCategory)?.label}
                         </p>
-                        <p className="truncate text-sm text-muted">{[i.brandName, i.name].filter(Boolean).join(" · ") || "ブランド不明"}</p>
+                        <p className="text-sm text-muted">{i.brandName ?? "ブランド不明"}</p>
                         <div className="mt-1">
                           <LifeMeter life={life} />
                         </div>
@@ -95,19 +95,32 @@ export default function WardrobePage() {
             <SectionTitle>
               {CATEGORY_LABEL[cat]}（{list.length}）
             </SectionTitle>
-            <ul className="grid grid-cols-2 gap-3">
+            <ul className="space-y-2">
               {list.map((i) => {
                 const life = lives.get(i.id)!;
                 return (
                   <li key={i.id}>
-                    <Link href={`/wardrobe/item/?id=${i.id}`} className="block overflow-hidden rounded-2xl border-2 border-line bg-surface">
-                      <ItemThumb item={i} className="h-28" />
-                      <div className="space-y-1 p-2.5">
-                        <p className="truncate text-sm text-muted">{i.brandName ?? "ブランド不明"}</p>
-                        <p className="truncate text-base font-bold">{i.name ?? `${colorById(i.color).label}の${subCategoryById(i.subCategory)?.label}`}</p>
-                        <p className="text-sm text-muted">着用 {life.wearCount}回</p>
-                        <LifeMeter life={life} compact />
+                    <Link href={`/wardrobe/item/?id=${i.id}`} className="flex items-center gap-3 rounded-2xl border-2 border-line bg-surface p-2.5">
+                      <div className="w-20 shrink-0 overflow-hidden rounded-xl">
+                        <ItemThumb item={i} className="h-20" label={false} />
                       </div>
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <p className="text-base font-bold leading-snug">
+                          {colorById(i.color).label}の{subCategoryById(i.subCategory)?.label}
+                        </p>
+                        <p className="text-sm leading-snug text-muted">
+                          {[i.brandName ?? "ブランド不明", i.name].filter(Boolean).join("・")}
+                        </p>
+                        <div className="flex items-center gap-3">
+                          <span className="shrink-0 text-sm font-bold">着用{life.wearCount}回</span>
+                          <div className="min-w-0 flex-1">
+                            <LifeMeter life={life} compact />
+                          </div>
+                        </div>
+                      </div>
+                      <span aria-hidden className="text-xl text-muted">
+                        ›
+                      </span>
                     </Link>
                   </li>
                 );
@@ -128,12 +141,14 @@ export default function WardrobePage() {
               <p className="text-base text-muted">ブランドのわかる服を登録すると表示されます。</p>
             ) : (
               <dl className="grid grid-cols-2 gap-x-3 gap-y-3 text-base">
-                <div>
+                <div className="col-span-2">
                   <dt className="text-sm text-muted">価格帯</dt>
-                  <dd className="font-bold">{profile.tierLabel}</dd>
-                  <dd className="text-sm text-muted">1着 {profile.priceRange}</dd>
+                  <dd className="font-bold">
+                    {profile.tierLabel}
+                    <span className="ml-2 text-sm font-normal text-muted">1着 {profile.priceRange}</span>
+                  </dd>
                 </div>
-                <div>
+                <div className="col-span-2">
                   <dt className="text-sm text-muted">客層</dt>
                   <dd className="font-bold">{profile.ageBand}</dd>
                 </div>

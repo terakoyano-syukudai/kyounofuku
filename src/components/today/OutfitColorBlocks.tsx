@@ -15,7 +15,8 @@ function Figure({ o }: { o: Outfit }) {
   const ring = "0 0 0 1px rgb(0 0 0 / 0.08) inset";
 
   return (
-    <div className="relative mx-auto h-[250px] w-[132px] origin-left scale-[0.79]" aria-hidden>
+    // zoom で図全体を縮小（レイアウト上の大きさも一緒に縮むので、横の一覧に幅を回せる）
+    <div className="relative h-[250px] w-[132px] shrink-0" style={{ zoom: 0.62 }} aria-hidden>
       {/* 頭 */}
       <div className="absolute left-1/2 top-0 h-9 w-9 -translate-x-1/2 rounded-full bg-surface-2" />
       {/* 羽織り（前開き） */}
@@ -48,15 +49,15 @@ function Row({ role, item }: { role: string; item: WardrobeItem | null }) {
   if (!item) return null;
   const c = colorById(item.color);
   return (
-    <li className="flex min-w-0 items-center gap-3">
+    <li className="flex min-w-0 items-center gap-2">
       <span
-        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-sm font-black"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-black"
         style={{ background: c.hex, color: inkOn(c.hex), boxShadow: "0 0 0 1px rgb(0 0 0 / 0.08) inset" }}
       >
         {role}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block break-words text-base font-bold leading-snug">
+        <span className="block break-words text-[15px] font-bold leading-snug">
           {c.label}の{subCategoryById(item.subCategory)?.label}
         </span>
         <span className="block break-words text-sm leading-snug text-muted">{item.brandName ?? "ブランド不明"}</span>
@@ -67,9 +68,9 @@ function Row({ role, item }: { role: string; item: WardrobeItem | null }) {
 
 export function OutfitColorBlocks({ outfit }: { outfit: Outfit }) {
   return (
-    <div className="grid grid-cols-[104px_minmax(0,1fr)] items-center gap-3">
+    <div className="flex items-start gap-3">
       <Figure o={outfit} />
-      <ul className="space-y-3">
+      <ul className="min-w-0 flex-1 space-y-3">
         <Row role="羽織" item={outfit.outer} />
         <Row role="上" item={outfit.top} />
         <Row role="下" item={outfit.bottom} />
