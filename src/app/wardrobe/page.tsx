@@ -1,84 +1,92 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { Suspense } from "react";
 import { Loading } from "@/components/Loading";
 import { SampleButton } from "@/components/SampleButton";
-import { Card, SectionTitle, inkOn } from "@/components/ui";
-import { CATEGORIES, CATEGORY_LABEL, colorById, subCategoryById } from "@/lib/constants";
+import { Card, PageHeader, SectionTitle } from "@/components/ui";
+import { ItemThumb, LifeMeter } from "@/components/wardrobe/ItemVisual";
+import { CATEGORIES, CATEGORY_LABEL, colorById, subCategoryById, yen } from "@/lib/constants";
 import { buildBrandProfile } from "@/lib/engine/brand-profile";
-import { allBrands, listItems, useAppData } from "@/lib/store";
+import { lifeInfo, type LifeInfo } from "@/lib/engine/lifespan";
+import { allBrands, listItems, useAppData, wearCount } from "@/lib/store";
+import type { WardrobeItem } from "@/lib/types";
+import { todayISO } from "@/lib/weather";
 
-export default function WardrobePage() {
-  return (
-    <Suspense fallback={<Loading />}>
-      <Wardrobe />
-    </Suspense>
-  );
+/** 楽天で同じ種類の服を予算内で探すリンク（APIを使わない検索ページ） */
+function rakutenSearchUrl(item: WardrobeItem, section: string, budget: number) {
+  const who = section === "mens" ? "メンズ" : section === "womens" ? "レディース" : "";
+  const kw = [subCategoryById(item.subCategory)?.label, colorById(item.color).label, who].filter(Boolean).join(" ");
+  return `https://search.rakuten.co.jp/search/mall/${encodeURIComponent(kw)}/?max=${budget}`;
 }
 
-function Wardrobe() {
+export default function WardrobePage() {
   const data = useAppData();
-  const sp = useSearchParams();
   if (!data) return <Loading />;
+  const today = todayISO();
   const items = listItems(data);
   const profile = buildBrandProfile(items, allBrands(data));
+  const lives = new Map<string, LifeInfo>(items.map((i) => [i.id, lifeInfo(i, wearCount(data, i.id), today)]));
+  const replace = items.filter((i) => lives.get(i.id)!.status !== "ok").sort((a, b) => lives.get(b.id)!.used - lives.get(a.id)!.used);
 
   return (
     <div>
-      <div className="flex items-center justify-between px-1">
-        <h1 className="text-2xl font-black">クローゼット</h1>
-        <span className="text-sm text-muted">{items.length}着</span>
-      </div>
-      {sp.get("added") && <div className="mt-3 rounded-2xl bg-good/15 px-4 py-2.5 text-sm font-bold text-good">✓ 登録しました</div>}
+      <PageHeader title="クローゼット" description={`登録した服 ${items.length}着。タップすると詳細（着た回数・購入時期）を見られます。`} />
 
-      {/* ブランドの自動学習の結果 */}
-      <Card className="mt-3">
-        <div className="text-xs font-bold text-muted">手持ちから推定したあなたの傾向</div>
-        {profile.brandedCount === 0 ? (
-          <p className="mt-2 text-sm text-muted">ブランドのわかる服を登録すると、好みの価格帯やテイストを自動で推定します。</p>
-        ) : (
-          <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
-            <div>
-              <dt className="text-[11px] text-muted">価格帯</dt>
-              <dd className="font-bold">{profile.tierLabel}</dd>
-              <dd className="text-[11px] text-muted">1着 {profile.priceRange}</dd>
-            </div>
-            <div>
-              <dt className="text-[11px] text-muted">客層</dt>
-              <dd className="font-bold">{profile.ageBand}</dd>
-            </div>
-            <div className="col-span-2">
-              <dt className="text-[11px] text-muted">テイスト</dt>
-              <dd className="mt-1 flex flex-wrap gap-1.5">
-                {profile.topTastes.map((t) => (
-                  <span key={t.id} className="rounded-full bg-accent/10 px-2.5 py-1 text-xs font-bold text-accent">
-                    {t.label} {Math.round(t.score * 100)}%
-                  </span>
-                ))}
-              </dd>
-            </div>
-            <div className="col-span-2">
-              <dt className="text-[11px] text-muted">よく着るブランド</dt>
-              <dd className="text-xs">{profile.topBrands.map((b) => `${b.name}(${b.count})`).join("・")}</dd>
-            </div>
-          </dl>
-        )}
-      </Card>
-
-      <Link href="/wardrobe/accuracy" className="mt-2 flex items-center justify-between rounded-2xl bg-surface px-4 py-3 text-sm">
-        <span>🎯 タグ読み取りの精度を見る</span>
-        <span className="text-muted">›</span>
+      <Link href="/wardrobe/add/" className="flex min-h-16 items-center justify-center gap-2 rounded-2xl bg-accent text-lg font-bold text-accent-ink shadow-sm">
+        ＋ 服を登録する（写真・タグ）
       </Link>
 
       {items.length === 0 && (
-        <Card className="mt-3 space-y-2 text-center">
-          <p className="text-sm text-muted">まだ服が登録されていません</p>
+        <Card className="mt-4 space-y-3 text-center">
+          <p className="text-base">まだ服が登録されていません</p>
           <SampleButton />
         </Card>
       )}
 
+      {/* 買い替えのおすすめ */}
+      {replace.length > 0 && (
+        <>
+          <SectionTitle icon="🔁" description="着た回数か購入からの年数が、種類ごとの目安に近づいた服です">
+            そろそろ買い替え（{replace.length}着）
+          </SectionTitle>
+          <ul className="space-y-3">
+            {replace.map((i) => {
+              const life = lives.get(i.id)!;
+              const budget = data.user.budgets[i.category] ?? 10000;
+              return (
+                <li key={i.id}>
+                  <Card className="p-3">
+                    <Link href={`/wardrobe/item/?id=${i.id}`} className="flex gap-3">
+                      <div className="w-20 shrink-0 overflow-hidden rounded-xl">
+                        <ItemThumb item={i} className="h-20" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-base font-bold">
+                          {colorById(i.color).label}の{subCategoryById(i.subCategory)?.label}
+                        </p>
+                        <p className="truncate text-sm text-muted">{[i.brandName, i.name].filter(Boolean).join(" · ") || "ブランド不明"}</p>
+                        <div className="mt-1">
+                          <LifeMeter life={life} />
+                        </div>
+                      </div>
+                    </Link>
+                    <a
+                      href={rakutenSearchUrl(i, data.user.style.shopSection, budget)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-3 flex min-h-12 items-center justify-center rounded-2xl border-2 border-line text-base font-bold"
+                    >
+                      🔍 楽天で探す（{yen(budget)}まで）
+                    </a>
+                  </Card>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+
+      {/* カテゴリごとの一覧 */}
       {CATEGORIES.map((cat) => {
         const list = items.filter((i) => i.category === cat);
         if (!list.length) return null;
@@ -87,21 +95,18 @@ function Wardrobe() {
             <SectionTitle>
               {CATEGORY_LABEL[cat]}（{list.length}）
             </SectionTitle>
-            <ul className="grid grid-cols-3 gap-2">
+            <ul className="grid grid-cols-2 gap-3">
               {list.map((i) => {
-                const c = colorById(i.color);
+                const life = lives.get(i.id)!;
                 return (
                   <li key={i.id}>
-                    <Link href={`/wardrobe/item?id=${i.id}`} className="block overflow-hidden rounded-2xl border border-line bg-surface">
-                      <div
-                        className="flex h-20 items-end p-2 text-[11px] font-bold"
-                        style={{ background: c.hex, color: inkOn(c.hex), boxShadow: "0 -1px 0 rgb(0 0 0 / 0.06) inset" }}
-                      >
-                        {subCategoryById(i.subCategory)?.label}
-                      </div>
-                      <div className="p-2">
-                        <div className="truncate text-[11px] text-muted">{i.brandName ?? "ブランド不明"}</div>
-                        <div className="truncate text-xs font-bold">{i.name ?? c.label}</div>
+                    <Link href={`/wardrobe/item/?id=${i.id}`} className="block overflow-hidden rounded-2xl border-2 border-line bg-surface">
+                      <ItemThumb item={i} className="h-28" />
+                      <div className="space-y-1 p-2.5">
+                        <p className="truncate text-sm text-muted">{i.brandName ?? "ブランド不明"}</p>
+                        <p className="truncate text-base font-bold">{i.name ?? `${colorById(i.color).label}の${subCategoryById(i.subCategory)?.label}`}</p>
+                        <p className="text-sm text-muted">着用 {life.wearCount}回</p>
+                        <LifeMeter life={life} compact />
                       </div>
                     </Link>
                   </li>
@@ -112,12 +117,49 @@ function Wardrobe() {
         );
       })}
 
-      <Link
-        href="/wardrobe/add"
-        className="fixed bottom-24 right-[max(1rem,calc(50%-14rem+1rem))] z-20 flex items-center gap-2 rounded-full bg-accent px-5 py-3.5 text-sm font-bold text-accent-ink shadow-lg"
-      >
-        📷 タグを撮って追加
-      </Link>
+      {/* ブランドの自動学習の結果 */}
+      {items.length > 0 && (
+        <>
+          <SectionTitle icon="📊" description="登録した服のブランドから、好みの価格帯やテイストを推定しています">
+            あなたの傾向
+          </SectionTitle>
+          <Card>
+            {profile.brandedCount === 0 ? (
+              <p className="text-base text-muted">ブランドのわかる服を登録すると表示されます。</p>
+            ) : (
+              <dl className="grid grid-cols-2 gap-x-3 gap-y-3 text-base">
+                <div>
+                  <dt className="text-sm text-muted">価格帯</dt>
+                  <dd className="font-bold">{profile.tierLabel}</dd>
+                  <dd className="text-sm text-muted">1着 {profile.priceRange}</dd>
+                </div>
+                <div>
+                  <dt className="text-sm text-muted">客層</dt>
+                  <dd className="font-bold">{profile.ageBand}</dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-sm text-muted">テイスト</dt>
+                  <dd className="mt-1 flex flex-wrap gap-1.5">
+                    {profile.topTastes.map((t) => (
+                      <span key={t.id} className="rounded-full bg-accent/10 px-3 py-1 text-sm font-bold text-accent">
+                        {t.label} {Math.round(t.score * 100)}%
+                      </span>
+                    ))}
+                  </dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-sm text-muted">よく着るブランド</dt>
+                  <dd className="text-sm">{profile.topBrands.map((b) => `${b.name}(${b.count})`).join("・")}</dd>
+                </div>
+              </dl>
+            )}
+          </Card>
+          <Link href="/wardrobe/accuracy/" className="mt-3 flex min-h-12 items-center justify-between rounded-2xl border-2 border-line bg-surface px-4 text-base font-bold">
+            <span>🎯 タグ読み取りの精度を見る</span>
+            <span aria-hidden>›</span>
+          </Link>
+        </>
+      )}
     </div>
   );
 }

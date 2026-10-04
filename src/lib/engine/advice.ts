@@ -105,3 +105,42 @@ export function buildHeadline(o: Outfit, advice: SlotAdvice[]): string {
   const when = need.length === 2 && need.includes("朝") && need.includes("夜") ? "朝晩" : need.join("・");
   return `${main}、${when}は${shortLabel(o.outer)}`;
 }
+
+export type Reason = { icon: string; title: string; text: string };
+
+/** 「なぜこのコーデ？」の説明（気温・予定・動き・雨・配色の観点で） */
+export function explainOutfit(ctx: DayContext, o: Outfit): Reason[] {
+  const out: Reason[] = [];
+  if (!o.top) return out;
+  const outer = o.outer ? shortLabel(o.outer) : null;
+  const needOuter = ctx.reqAtColdest > o.top.warmth;
+  out.push({
+    icon: "🌡️",
+    title: "気温",
+    text: `体感は最高${Math.round(ctx.feelsMax)}°・最低${Math.round(ctx.feelsMin)}°。${
+      outer ? (needOuter ? `寒い時間帯は${outer}を羽織って調整します。` : `日中はトップス1枚、念のため${outer}を。`) : "1日トップス1枚で過ごせる気温です。"
+    }`,
+  });
+  const scenes = ctx.active.map((s) => s.scene).filter((s): s is NonNullable<typeof s> => !!s);
+  const formal = [...scenes].sort((a, b) => b.formality - a.formality)[0];
+  if (formal) {
+    out.push({
+      icon: "🎯",
+      title: "予定",
+      text:
+        formal.formality >= 50
+          ? `いちばんきちんとした予定「${formal.label}」に合わせて、きれいめ寄りにしました。`
+          : `予定はカジュアル中心（${[...new Set(scenes.map((s) => s.label))].join("・")}）なので、気楽な服装にしました。`,
+    });
+  }
+  const active = [...scenes].sort((a, b) => b.activity - a.activity)[0];
+  if (active && active.activity >= 70) out.push({ icon: "🏃", title: "動き", text: `「${active.label}」でよく動くので、動きやすい服と靴を優先しました。` });
+  if (ctx.rainProb >= 50) {
+    const rainOk = o.shoes && subCategoryById(o.shoes.subCategory)?.rainOk;
+    out.push({ icon: "☔", title: "雨", text: `降水確率${ctx.rainProb}%。${rainOk ? "雨に強い靴を選びました。" : "手持ちに雨向きの靴がないため、濡れても困らない靴がおすすめです。"}` });
+  }
+  if (ctx.hotHumid) out.push({ icon: "💧", title: "湿度", text: "蒸し暑いので、通気性のいい素材を優先しました。" });
+  const harmony = o.reasons.find((r) => r.includes("配色"));
+  if (harmony) out.push({ icon: "🎨", title: "配色", text: `${harmony}です。` });
+  return out;
+}

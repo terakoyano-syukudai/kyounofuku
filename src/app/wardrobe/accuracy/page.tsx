@@ -4,7 +4,7 @@ import Link from "next/link";
 import { z } from "zod";
 import { AccuracyBars } from "@/components/accuracy/AccuracyBars";
 import { Loading } from "@/components/Loading";
-import { Card, SectionTitle } from "@/components/ui";
+import { Card, PageHeader, SectionTitle } from "@/components/ui";
 import { FIELDS, compareAnalysis, isMiss, summarize, type Comparison } from "@/lib/ai/accuracy";
 import { CATEGORIES } from "@/lib/constants";
 import { findBrand, listItems, useAppData, type AppData } from "@/lib/store";
@@ -13,6 +13,7 @@ import type { WardrobeItem } from "@/lib/types";
 // 登録時に保存した読み取り結果（{ mode, analysis }）
 const StoredSchema = z.object({
   mode: z.string(),
+  model: z.string().nullable().optional(),
   analysis: z.object({
     brand: z.string().default(""),
     category: z.enum(CATEGORIES).nullable().default(null),
@@ -31,11 +32,12 @@ function compareAll(data: AppData) {
     if (ba && bb) return ba.id === bb.id;
     return a.toLowerCase().replace(/\s/g, "") === b.toLowerCase().replace(/\s/g, "");
   };
-  const rows: { item: WardrobeItem; cmp: Comparison }[] = [];
+  const rows: { item: WardrobeItem; cmp: Comparison; method: "ocr" | "paste" }[] = [];
   for (const item of listItems(data)) {
     const raw = StoredSchema.safeParse(item.aiRaw);
     if (!raw.success || raw.data.mode !== "ocr") continue;
     rows.push({
+      method: raw.data.model === "paste" ? "paste" : "ocr",
       item,
       cmp: compareAnalysis(
         raw.data.analysis,
@@ -51,53 +53,63 @@ function compareAll(data: AppData) {
       ),
     });
   }
-  return { rows, summary: summarize(rows.map((r) => r.cmp)) };
+  return rows;
 }
+
+const METHOD_LABEL = { ocr: "📷 タグ写真の文字認識（アプリ内）", paste: "📋 Galaxyで読んだ文字の貼り付け" } as const;
 
 export default function AccuracyPage() {
   const data = useAppData();
   if (!data) return <Loading />;
-  const { rows, summary } = compareAll(data);
-  const mistakes = rows.filter((r) => FIELDS.some((f) => isMiss(r.cmp.fields[f.id])));
+  const rows = compareAll(data);
 
   return (
     <div>
-      <Link href="/wardrobe" className="px-1 text-sm text-muted">
-        ‹ クローゼット
-      </Link>
-      <h1 className="mt-2 px-1 text-2xl font-black">タグ読み取りの精度</h1>
-      <p className="mt-1 px-1 text-xs leading-relaxed text-muted">
-        登録時の「内容を確認」で直した項目を、読み取りの間違いとして数えています。直さずに保存した項目は正解扱いになるので、確認が甘いと実際より高く出ます。
-      </p>
+      <PageHeader
+        title="タグ読み取りの精度"
+        description="登録時の「内容を確認」で直した項目を、読み取りの間違いとして数えています。直さずに保存した項目は正解扱いになるので、確認が甘いと実際より高く出ます。"
+        back={{ href: "/wardrobe/", label: "クローゼット" }}
+      />
 
-      <SectionTitle>端末内の文字認識</SectionTitle>
-      <Card>
-        {summary.n === 0 ? (
-          <p className="text-sm text-muted">まだデータがありません。タグ写真から服を登録すると、ここに集計されます。</p>
-        ) : (
-          <AccuracyBars summary={summary} />
-        )}
-      </Card>
-
-      {mistakes.length > 0 && (
-        <details className="mt-2">
-          <summary className="cursor-pointer px-1 text-xs font-bold text-muted">読み間違えた項目（{mistakes.length}着）</summary>
-          <ul className="mt-2 space-y-2">
-            {mistakes.map((r) => (
-              <li key={r.item.id}>
-                <Link href={`/wardrobe/item?id=${r.item.id}`} className="block rounded-2xl bg-surface p-3 text-xs">
-                  <div className="mb-1 text-sm font-bold">{[r.item.brandName, r.item.name].filter(Boolean).join(" ") || "（名前なし）"}</div>
-                  {FIELDS.filter((f) => isMiss(r.cmp.fields[f.id])).map((f) => (
-                    <div key={f.id}>
-                      {f.label}: <span className="text-red-600 line-through">{r.cmp.fields[f.id].ai}</span> → <b>{r.cmp.fields[f.id].truth}</b>
-                    </div>
-                  ))}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </details>
+      {rows.length === 0 && (
+        <Card>
+          <p className="text-base text-muted">まだデータがありません。タグを読み取って服を登録すると、読み取り方法ごとに集計されます。</p>
+        </Card>
       )}
+
+      {(["ocr", "paste"] as const).map((method) => {
+        const list = rows.filter((r) => r.method === method);
+        if (!list.length) return null;
+        const summary = summarize(list.map((r) => r.cmp));
+        const mistakes = list.filter((r) => FIELDS.some((f) => isMiss(r.cmp.fields[f.id])));
+        return (
+          <div key={method}>
+            <SectionTitle>{METHOD_LABEL[method]}</SectionTitle>
+            <Card>
+              <AccuracyBars summary={summary} />
+            </Card>
+            {mistakes.length > 0 && (
+              <details className="mt-3">
+                <summary className="flex min-h-11 cursor-pointer items-center px-1 text-base font-bold">読み間違えた項目を見る（{mistakes.length}着）</summary>
+                <ul className="mt-2 space-y-2">
+                  {mistakes.map((r) => (
+                    <li key={r.item.id}>
+                      <Link href={`/wardrobe/item/?id=${r.item.id}`} className="block rounded-2xl border-2 border-line bg-surface p-3 text-base">
+                        <div className="mb-1 font-bold">{[r.item.brandName, r.item.name].filter(Boolean).join(" ") || "（名前なし）"}</div>
+                        {FIELDS.filter((f) => isMiss(r.cmp.fields[f.id])).map((f) => (
+                          <div key={f.id} className="text-sm">
+                            {f.label}: <span className="text-red-600 line-through">{r.cmp.fields[f.id].ai}</span> → <b>{r.cmp.fields[f.id].truth}</b>
+                          </div>
+                        ))}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

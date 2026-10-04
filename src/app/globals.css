@@ -5,12 +5,12 @@
   --surface: #ffffff;
   --surface-2: #efece6;
   --ink: #1d1b19;
-  --muted: #6f6a63;
-  --line: #e2ddd5;
-  --accent: #c4552b;
+  --muted: #57524b;
+  --line: #d6d0c6;
+  --accent: #b4481f;
   --accent-ink: #ffffff;
   --good: #2f7a4f;
-  --warn: #b7791f;
+  --warn: #93600d;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -19,8 +19,8 @@
     --surface: #1e1c1a;
     --surface-2: #2a2724;
     --ink: #f1ede7;
-    --muted: #a39d94;
-    --line: #34302c;
+    --muted: #c2bcb2;
+    --line: #46413b;
     --accent: #e27a4f;
     --accent-ink: #1a0f0a;
     --good: #5fbf85;
@@ -40,6 +40,17 @@
   --color-good: var(--good);
   --color-warn: var(--warn);
   --font-sans: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", system-ui, sans-serif;
+}
+
+/* スマホで読みやすいよう、基準の文字サイズを少し大きく（17px） */
+html {
+  font-size: 106.25%;
+}
+
+/* キーボード操作時にどこを選んでいるか見えるように */
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
 }
 
 html,

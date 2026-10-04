@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { exportData, importData, resetAll } from "@/lib/store";
+import { toast } from "@/lib/toast";
 import { Button } from "../ui";
 
 /** データはこの端末にしかないので、書き出し・読み込みで引っ越しやバックアップをする */
@@ -11,19 +12,20 @@ export function BackupSetting() {
   const [confirm, setConfirm] = useState<"import" | "reset" | null>(null);
   const [pendingJson, setPendingJson] = useState<string | null>(null);
 
-  const download = () => {
-    const blob = new Blob([exportData()], { type: "application/json" });
+  const download = async () => {
+    const blob = new Blob([await exportData()], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `kyounofuku-backup-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
-    setMsg("バックアップファイルを保存しました（ダウンロードフォルダ）");
+    setMsg("バックアップファイルを保存しました（ダウンロードフォルダ）。写真も含まれます。");
+    toast("バックアップを書き出しました");
   };
 
   return (
     <div>
-      <p className="text-xs leading-relaxed text-muted">
+      <p className="text-sm leading-relaxed text-muted">
         服や体型のデータはこの端末の中だけに保存されています。機種変更やブラウザのデータ削除に備えて、ときどき書き出しておくと安心です。
       </p>
       <div className="mt-3 grid grid-cols-2 gap-2">
@@ -63,13 +65,15 @@ export function BackupSetting() {
             </Button>
             <Button
               variant="danger"
-              onClick={() => {
+              onClick={async () => {
                 if (confirm === "import" && pendingJson) {
-                  const r = importData(pendingJson);
+                  const r = await importData(pendingJson);
                   setMsg(r.ok ? `読み込みました（服 ${r.items}着）` : r.error);
+                  toast(r.ok ? "バックアップから復元しました" : r.error, r.ok ? "success" : "error");
                 } else if (confirm === "reset") {
                   resetAll();
                   setMsg("データを消去しました");
+                  toast("データを消去しました", "info");
                 }
                 setConfirm(null);
                 setPendingJson(null);
@@ -80,9 +84,9 @@ export function BackupSetting() {
           </div>
         </div>
       )}
-      {msg && <p className="mt-2 text-xs text-muted">{msg}</p>}
+      {msg && <p className="mt-2 text-sm text-muted">{msg}</p>}
 
-      <button type="button" className="mt-4 text-xs text-red-600 underline" onClick={() => setConfirm("reset")}>
+      <button type="button" className="mt-4 min-h-11 text-sm font-bold text-red-600 underline" onClick={() => setConfirm("reset")}>
         すべてのデータを消去
       </button>
     </div>

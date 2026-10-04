@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { BottomNav } from "@/components/BottomNav";
+import { Toaster } from "@/components/Toaster";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -22,8 +23,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="ja" className="h-full antialiased">
       <body className="min-h-full">
-        <main className="mx-auto w-full max-w-md px-4 pb-28 pt-4">{children}</main>
+        <main className="mx-auto w-full max-w-md px-4 pb-32 pt-5">{children}</main>
         <BottomNav />
+        <Toaster />
       </body>
     </html>
   );

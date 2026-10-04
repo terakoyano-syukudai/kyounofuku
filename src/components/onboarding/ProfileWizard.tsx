@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { saveProfile } from "@/lib/store";
+import { toast } from "@/lib/toast";
 import {
   BODY_SHAPES,
   BUDGET_CATEGORIES,
@@ -49,9 +50,9 @@ export function ProfileWizard({
     <div className="flex min-h-[calc(100dvh-2rem)] flex-col">
       <div className="flex gap-1.5 pt-2">
         {STEPS.map((label, i) => (
-          <button key={label} type="button" onClick={() => setStep(i)} className="flex-1 text-left">
+          <button key={label} type="button" onClick={() => setStep(i)} className="min-h-11 flex-1 text-left" aria-current={i === step ? "step" : undefined}>
             <div className={`h-1.5 rounded-full ${i <= step ? "bg-accent" : "bg-surface-2"}`} />
-            <div className={`mt-1 text-[11px] ${i === step ? "font-bold" : "text-muted"}`}>{label}</div>
+            <div className={`mt-1 text-xs ${i === step ? "font-bold" : "text-muted"}`}>{label}</div>
           </button>
         ))}
       </div>
@@ -79,7 +80,7 @@ export function ProfileWizard({
                   className={`rounded-2xl border p-3 text-left ${body.bodyShape === shape.id ? "border-accent bg-accent/10" : "border-line bg-surface"}`}
                 >
                   <div className="text-sm font-bold">{shape.label}</div>
-                  <div className="mt-0.5 text-[11px] leading-snug text-muted">{shape.desc}</div>
+                  <div className="mt-0.5 text-xs leading-snug text-muted">{shape.desc}</div>
                 </button>
               ))}
             </div>
@@ -175,7 +176,7 @@ export function ProfileWizard({
                     >
                       {liked ? "♥" : avoided ? "✕" : ""}
                     </span>
-                    <span className="text-[10px] text-muted">{c.label}</span>
+                    <span className="text-xs text-muted">{c.label}</span>
                   </button>
                 );
               })}
@@ -227,6 +228,7 @@ export function ProfileWizard({
           <Button
             onClick={() => {
               saveProfile(body, style, budgets);
+              toast(editing ? "設定を保存しました" : "登録しました。今日のコーデを提案します");
               router.push("/");
             }}
           >

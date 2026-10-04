@@ -43,7 +43,7 @@ export function LocationSetting({ current }: { current: string | null }) {
           📍 現在地を使う
         </Button>
       ) : (
-        <p className="mt-3 rounded-xl bg-surface-2 p-3 text-xs text-muted">この接続では現在地を取得できません。下の検索でエリアを選んでください。</p>
+        <p className="mt-3 rounded-xl bg-surface-2 p-3 text-sm text-muted">この接続では現在地を取得できません。下の検索でエリアを選んでください。</p>
       )}
       <form
         className="mt-2 flex gap-2"
@@ -69,7 +69,7 @@ export function LocationSetting({ current }: { current: string | null }) {
             <li key={`${r.lat},${r.lon}`}>
               <button
                 type="button"
-                className="w-full px-3 py-2.5 text-left text-sm"
+                className="w-full px-3 min-h-12 py-3 text-left text-base"
                 onClick={() =>
                   start(async () => {
                     saveLocation(r.name, r.lat, r.lon);
@@ -78,13 +78,13 @@ export function LocationSetting({ current }: { current: string | null }) {
                   })
                 }
               >
-                {r.name} <span className="text-xs text-muted">{r.admin}</span>
+                {r.name} <span className="text-sm text-muted">{r.admin}</span>
               </button>
             </li>
           ))}
         </ul>
       )}
-      {msg && <p className="mt-2 text-xs text-muted">{msg}</p>}
+      {msg && <p className="mt-2 text-sm text-muted">{msg}</p>}
     </div>
   );
 }

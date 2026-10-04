@@ -6,7 +6,8 @@ import { PERIODS, PERIOD_META, type Period } from "@/lib/constants";
 import { TIMELINE_PRESETS } from "@/lib/db/seed-data";
 import { saveDayPlan } from "@/lib/store";
 import type { DayPlan, Scene } from "@/lib/types";
-import { Button, Chip } from "../ui";
+import { toast } from "@/lib/toast";
+import { Button, Chip, PageHeader } from "../ui";
 
 export function TimelineEditor({
   scenes,
@@ -34,7 +35,7 @@ export function TimelineEditor({
 
   return (
     <div>
-      <h1 className="px-1 text-2xl font-black">1日の予定</h1>
+      <PageHeader title="1日の予定" description="朝・昼・夕・夜の予定を入れると、時間帯ごとの気温差や場面に合わせて服を提案します。" />
       <div className="mt-3 flex gap-1 rounded-full bg-surface p-1 text-sm font-bold">
         {[
           { d: dates.today, label: "今日" },
@@ -44,14 +45,14 @@ export function TimelineEditor({
             key={x.d}
             type="button"
             onClick={() => setDate(x.d)}
-            className={`flex-1 rounded-full py-2 ${date === x.d ? "bg-ink text-bg" : "text-muted"}`}
+            className={`min-h-11 flex-1 rounded-full text-base ${date === x.d ? "bg-ink text-bg" : "text-muted"}`}
           >
             {x.label}
           </button>
         ))}
       </div>
 
-      <div className="mt-5 px-1 text-sm font-bold text-muted">ワンタップで入力</div>
+      <h2 className="mt-6 px-1 text-lg font-black">① テンプレートからワンタップで入力</h2>
       <div className="no-scrollbar -mx-4 mt-2 flex gap-2 overflow-x-auto px-4 pb-1">
         {TIMELINE_PRESETS.map((p) => (
           <Chip key={p.id} active={presetActive(p.id)} onClick={() => applyPreset(p.id)}>
@@ -60,7 +61,7 @@ export function TimelineEditor({
         ))}
       </div>
 
-      <div className="mt-5 px-1 text-sm font-bold text-muted">時間帯ごとに調整</div>
+      <h2 className="mt-6 px-1 text-lg font-black">② 時間帯ごとに調整（タップで変更）</h2>
       <ol className="mt-2 space-y-2">
         {PERIODS.map((p) => {
           const scene = slots[p] ? sceneMap.get(slots[p]!) : null;
@@ -71,7 +72,7 @@ export function TimelineEditor({
                 onClick={() => setPicking(p)}
                 className="flex w-full items-center gap-3 rounded-2xl border border-line bg-surface p-3 text-left active:scale-[0.99]"
               >
-                <span className="flex h-11 w-11 items-center justify-center rounded-full bg-surface-2 text-lg">{PERIOD_META[p].emoji}</span>
+                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-2 text-xl">{PERIOD_META[p].emoji}</span>
                 <span className="flex-1">
                   <span className="block text-xs text-muted">
                     {PERIOD_META[p].label}（{PERIOD_META[p].hours[0]}〜{PERIOD_META[p].hours[1]}時）
@@ -89,6 +90,7 @@ export function TimelineEditor({
         className="mt-6 w-full"
         onClick={() => {
           saveDayPlan({ date, slots });
+          toast("予定を保存しました");
           router.push(`/?date=${date}`);
         }}
       >

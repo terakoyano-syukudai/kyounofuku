@@ -36,6 +36,7 @@ const MATERIALS: [RegExp, string][] = [
 // 取扱い表示の文章 → 洗濯表示ID
 const CARE_PHRASES: [RegExp, string][] = [
   [/手洗い/, "hand_wash"],
+  [/洗濯機.{0,10}(洗え|洗濯ができ|可)/, "wash_30"],
   [/(水洗い|家庭洗濯).{0,6}(でき|不可|禁止)/, "no_wash"],
   [/漂白.{0,8}(使用しない|使えない|でき(ません|ない)|不可|禁止|避け)/, "no_bleach"],
   [/タンブル.{0,10}(避け|しない|でき(ません|ない)|不可|禁止)/, "no_tumble"],
@@ -91,11 +92,18 @@ export function parseTagText(raw: string, brands: BrandRef[]): ParsedTag {
   // 素材: 裏地・付属の表示より前（表地）を優先
   const body = text.split(/裏地|別布|付属|リブ部分/)[0];
   const materials: { name: string; pct: number }[] = [];
-  const re = /([^\s\d%:：,、]{1,12})\s*[:：]?\s*(\d{1,3})\s*%/g;
-  for (const m of body.matchAll(re)) {
-    const hit = MATERIALS.find(([r]) => r.test(m[1]));
-    const pct = Number(m[2]);
+  const addMaterial = (name: string, pctText: string) => {
+    const hit = MATERIALS.find(([r]) => r.test(name));
+    const pct = Number(pctText);
     if (hit && pct > 0 && pct <= 100 && !materials.some((x) => x.name === hit[1])) materials.push({ name: hit[1], pct });
+  };
+  // 行ごとに書き方を判定: 数字%で始まる行は「100% COTTON」「60%綿」（海外製に多い）、それ以外は「綿 60%」
+  for (const line of body.split(/\n/)) {
+    if (/^\s*\d{1,3}\s*%/.test(line)) {
+      for (const m of line.matchAll(/(\d{1,3})[ \t]*%[ \t]*([^\s\d%:：,、]{1,12})/g)) addMaterial(m[2], m[1]);
+    } else {
+      for (const m of line.matchAll(/([^\s\d%:：,、]{1,12})[ \t]*[:：]?[ \t]*(\d{1,3})[ \t]*%/g)) addMaterial(m[1], m[2]);
+    }
   }
   const total = materials.reduce((a, m) => a + m.pct, 0);
   if (materials.length && total >= 95 && total <= 105) found.push("素材");
@@ -124,13 +132,38 @@ export function parseTagText(raw: string, brands: BrandRef[]): ParsedTag {
       }
     }
   }
-  if (brand) found.push("ブランド");
+  let brandGuessed = false;
+  // 他の項目（素材・サイズ・洗濯の注意書き）も読めているときだけ推測する（読み取りが崩れたときの誤検出を防ぐ）
+  const readSomething = materials.length > 0 || /サイズ|size/i.test(text) || CARE_PHRASES.some(([r]) => r.test(text));
+  if (!brand && readSomething) {
+    // マスタにないブランド: 短い英字だけの行をブランド名の候補にする（素材・サイズなどの単語は除く）
+    const NOT_BRAND = /^(made|in|size|cotton|polyester|nylon|wool|rayon|acrylic|polyurethane|linen|silk|china|japan|vietnam|bangladesh|free|xs|s|m|l|xl|xxl)$/i;
+    const cand = raw
+      .split(/\n/)
+      .map((l) => l.trim())
+      // 英字で始まる3〜20文字、各単語が3文字以上で英字中心（"OxgHaro" のような崩れた文字列を避けるため大文字始まりの単語に限る）
+      .find(
+        (l) =>
+          /^[A-Z][A-Za-z0-9 .&'’-]{2,19}$/.test(l) &&
+          l.split(/\s+/).every((w) => /^[A-Z][A-Za-z.&'’-]{2,}$/.test(w) && (w === w.toUpperCase() || /^[A-Z][a-z]+$/.test(w))) &&
+          !/made\s+in|\d+\s*%/i.test(l) &&
+          !l.split(/\s+/).every((w) => NOT_BRAND.test(w)),
+      );
+    if (cand) {
+      brand = cand;
+      brandGuessed = true;
+    }
+  }
+  if (brand) found.push(brandGuessed ? "ブランド（候補）" : "ブランド");
 
   // 洗濯表示（記号は読めないので、取扱い注意の文章から拾う）
-  const care = [...new Set(CARE_PHRASES.filter(([r]) => r.test(text)).map(([, id]) => id))];
-  // 「40」「30」の数字は洗濯の文脈のときだけ採用
+  let care = [...new Set(CARE_PHRASES.filter(([r]) => r.test(text)).map(([, id]) => id))];
+  // 「40」「30」の数字は洗濯の文脈のときだけ採用（温度が書かれていればそちらを優先）
   const washTemp = text.match(/(洗濯|液温).{0,8}(40|30)/);
-  if (washTemp && !care.includes("hand_wash") && !care.includes("no_wash")) care.push(washTemp[2] === "40" ? "wash_40" : "wash_30");
+  if (washTemp && !care.includes("hand_wash") && !care.includes("no_wash")) {
+    care = care.filter((c) => c !== "wash_30" && c !== "wash_40");
+    care.push(washTemp[2] === "40" ? "wash_40" : "wash_30");
+  }
   if (care.length) found.push("洗濯表示（文章から）");
 
   const sub = SUB_WORDS.find(([r]) => r.test(text))?.[1] ?? null;

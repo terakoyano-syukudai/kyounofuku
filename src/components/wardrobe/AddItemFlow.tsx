@@ -2,23 +2,15 @@
 
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { parseTagText, type BrandRef } from "@/lib/ai/parse-tag-text";
-import { CARE_SYMBOLS, CATEGORIES, CATEGORY_LABEL, COLOR_FAMILIES, FITS, SUB_CATEGORIES, subCategoryById, type Category } from "@/lib/constants";
+import { parseTagText, type BrandRef, type ParsedTag } from "@/lib/ai/parse-tag-text";
+import { CARE_SYMBOLS, CATEGORIES, CATEGORY_LABEL, COLOR_FAMILIES, FITS, SUB_CATEGORIES, colorById, subCategoryById, type Category } from "@/lib/constants";
+import { recognizeText } from "@/lib/ocr";
+import { detectColor, resizeImage, savePhoto } from "@/lib/photo";
 import { addItem } from "@/lib/store";
-import { Button, Card, Chip, inkOn } from "../ui";
-
-type Shot = { preview: string };
-
-/** 長辺 2000px の JPEG に縮小（細かいタグの文字を読めるだけの解像度を残す） */
-async function shrink(file: File): Promise<Shot> {
-  const bmp = await createImageBitmap(file);
-  const scale = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(bmp.width * scale);
-  canvas.height = Math.round(bmp.height * scale);
-  canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-  return { preview: canvas.toDataURL("image/jpeg", 0.9) };
-}
+import { toast } from "@/lib/toast";
+import { PURCHASE_APPROX, type PurchaseApprox } from "@/lib/types";
+import { Button, Card, Chip, Notice, inkOn } from "../ui";
+import { TagCropper } from "./TagCropper";
 
 type Form = {
   brandName: string;
@@ -26,11 +18,12 @@ type Form = {
   category: Category;
   subCategory: string;
   color: string | null;
+  colorAuto: boolean; // 写真から自動判定した色か
   fit: "slim" | "regular" | "loose";
   size: string;
   materials: { name: string; pct: number }[];
   careSymbols: string[];
-  aiRaw?: unknown;
+  purchasedApprox: PurchaseApprox;
 };
 
 const emptyForm: Form = {
@@ -39,95 +32,98 @@ const emptyForm: Form = {
   category: "TOPS",
   subCategory: "tshirt",
   color: null,
+  colorAuto: false,
   fit: "regular",
   size: "",
-  materials: [{ name: "綿", pct: 100 }],
+  materials: [],
   careSymbols: [],
+  purchasedApprox: "unknown",
 };
 
-const OCR_STATUS: Record<string, string> = {
-  "loading tesseract core": "文字認識の準備中",
-  "initializing tesseract": "文字認識の準備中",
-  "loading language traineddata": "日本語データを読み込み中（初回のみ数MB）",
-  "initializing api": "文字認識の準備中",
-  "recognizing text": "文字を読み取り中",
-};
+/** 読み取り結果の良さ（素材・サイズ・ブランド・洗濯表示がいくつ取れたか） */
+const scoreFor = (brands: BrandRef[]) => (text: string) => parseTagText(text, brands).confidence;
 
-/** ブラウザ内で文字認識する（無料・画像は外部に送らない） */
-async function runOcr(images: string[], onProgress: (label: string, pct: number) => void): Promise<string> {
-  const { createWorker } = await import("tesseract.js");
-  const worker = await createWorker(["jpn", "eng"], 1, {
-    logger: (m) => onProgress(OCR_STATUS[m.status] ?? "準備中", Math.round(m.progress * 100)),
-  });
-  try {
-    const texts: string[] = [];
-    for (const img of images) texts.push((await worker.recognize(img)).data.text);
-    return texts.join("\n");
-  } finally {
-    await worker.terminate();
-  }
+/** 何度か読んだ結果をフォームに足していく（空いている欄だけ埋め、洗濯表示は追加） */
+function merge(form: Form, p: ParsedTag): Form {
+  const sub = p.sub_category ? subCategoryById(p.sub_category) : undefined;
+  return {
+    ...form,
+    brandName: form.brandName || p.brand,
+    size: form.size || p.size,
+    materials: form.materials.length ? form.materials : p.materials,
+    careSymbols: [...new Set([...form.careSymbols, ...p.care_symbols])],
+    ...(sub && form.subCategory === emptyForm.subCategory && form.category === emptyForm.category ? { category: sub.category, subCategory: sub.id } : {}),
+  };
 }
 
-type Meta = { found: string[]; text: string };
+type ReadLog = { source: "ocr" | "paste"; found: string[]; text: string };
 
 export function AddItemFlow({ brands }: { brands: BrandRef[] }) {
   const router = useRouter();
-  const [shots, setShots] = useState<Shot[]>([]);
-  const [status, setStatus] = useState<"idle" | "analyzing" | "review">("idle");
-  const [error, setError] = useState<string | null>(null);
-  const [meta, setMeta] = useState<Meta | null>(null);
-  const [progress, setProgress] = useState<{ label: string; pct: number } | null>(null);
   const [form, setForm] = useState<Form>(emptyForm);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [photo, setPhoto] = useState<string | null>(null);
+  const [cropFile, setCropFile] = useState<File | null>(null);
+  const [reading, setReading] = useState<{ label: string; pct: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [logs, setLogs] = useState<ReadLog[]>([]);
+  const [firstRead, setFirstRead] = useState<ParsedTag | null>(null); // 精度の集計用（修正前の最初の読み取り）
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const photoInput = useRef<HTMLInputElement>(null);
+  const tagInput = useRef<HTMLInputElement>(null);
 
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
 
-  async function onFiles(files: FileList | null) {
-    if (!files?.length) return;
-    setError(null);
-    const next = await Promise.all([...files].slice(0, 3 - shots.length).map(shrink)).catch(() => null);
-    if (!next) return setError("画像を読み込めませんでした。JPEG か PNG で試してください。");
-    setShots((s) => [...s, ...next].slice(0, 3));
-  }
+  const applyParsed = (p: ParsedTag, log: ReadLog) => {
+    setFirstRead((prev) => prev ?? p);
+    setForm((f) => merge(f, p));
+    setLogs((l) => [...l, log]);
+    toast(p.found.length ? `読み取りました: ${p.found.join("・")}` : "文字を読み取れませんでした", p.found.length ? "success" : "error");
+  };
 
-  async function analyze() {
-    setStatus("analyzing");
-    setError(null);
-    setProgress(null);
+  // ① 服全体の写真: 保存用に縮小し、色を自動判定
+  async function onPhoto(file: File | undefined) {
+    if (!file) return;
     try {
-      const text = await runOcr(
-        shots.map((s) => s.preview),
-        (label, pct) => setProgress({ label, pct }),
-      );
-      const p = parseTagText(text, brands);
-      const sub = p.sub_category ? subCategoryById(p.sub_category) : undefined;
-      setForm({
-        ...emptyForm,
-        brandName: p.brand,
-        category: sub?.category ?? emptyForm.category,
-        subCategory: sub?.id ?? emptyForm.subCategory,
-        size: p.size,
-        materials: p.materials.length ? p.materials : emptyForm.materials,
-        careSymbols: p.care_symbols,
-        // 修正前の読み取り結果を残しておき、確定内容との差で精度を測る（カテゴリは推定しないので null）
-        aiRaw: {
-          mode: "ocr",
-          model: "tesseract.js",
-          analysis: { brand: p.brand, category: sub?.category ?? null, sub_category: sub?.id ?? null, size: p.size, materials: p.materials, care_symbols: p.care_symbols },
-        },
-      });
-      setMeta({ found: p.found, text });
-      setStatus("review");
-    } catch (e) {
-      console.error(e);
-      setError("文字の読み取りに失敗しました。通信状況を確認して、もう一度お試しください。");
-      setStatus("idle");
+      const { dataUrl, canvas } = await resizeImage(file, 720);
+      setPhoto(dataUrl);
+      const { color } = detectColor(canvas);
+      setForm((f) => ({ ...f, color, colorAuto: true }));
+      toast(`写真から色を「${colorById(color).label}」と判定しました`);
+    } catch {
+      setError("写真を読み込めませんでした。別の写真で試してください。");
     }
   }
 
-  function save() {
+  // ② タグ: 切り抜き画面で整えた画像を文字認識
+  async function onCropped(prepared: HTMLCanvasElement) {
+    setCropFile(null);
+    setError(null);
+    setReading({ label: "準備中", pct: 0 });
+    try {
+      const text = await recognizeText(prepared, scoreFor(brands), (label, pct) => setReading({ label, pct }));
+      const p = parseTagText(text, brands);
+      applyParsed(p, { source: "ocr", found: p.found, text });
+    } catch (e) {
+      console.error(e);
+      setError("文字の読み取りに失敗しました。通信状況を確認して、もう一度お試しください。");
+    } finally {
+      setReading(null);
+    }
+  }
+
+  function onPaste() {
+    const text = pasteText.trim();
+    if (!text) return;
+    const p = parseTagText(text, brands);
+    applyParsed(p, { source: "paste", found: p.found, text });
+    setPasteText("");
+    setPasteOpen(false);
+  }
+
+  async function save() {
     if (!form.color) return;
-    addItem({
+    const id = addItem({
       brandName: form.brandName,
       name: form.name || null,
       category: form.category,
@@ -137,88 +133,137 @@ export function AddItemFlow({ brands }: { brands: BrandRef[] }) {
       materials: form.materials,
       careSymbols: form.careSymbols,
       size: form.size || null,
-      aiRaw: form.aiRaw,
+      purchasedApprox: form.purchasedApprox,
+      hasPhoto: !!photo,
+      // 修正前の最初の読み取り結果を残し、確定内容との差で精度を測る（カテゴリは推定しないので null）
+      aiRaw: firstRead
+        ? {
+            mode: "ocr",
+            model: logs[0]?.source === "paste" ? "paste" : "tesseract.js",
+            analysis: { brand: firstRead.brand, category: null, sub_category: firstRead.sub_category, size: firstRead.size, materials: firstRead.materials, care_symbols: firstRead.care_symbols },
+          }
+        : undefined,
     });
-    router.push("/wardrobe?added=1");
-  }
-
-  if (status !== "review") {
-    return (
-      <div>
-        <h1 className="px-1 text-2xl font-black">タグを撮って登録</h1>
-        <p className="mt-1 px-1 text-sm text-muted">
-          ブランドタグ・品質表示（素材の%）・洗濯表示を撮ると、自動で読み取ります（最大3枚）。
-          写真はこの端末の中だけで読み取ります（無料）。文字が大きく、まっすぐ写るように撮ると精度が上がります。
-        </p>
-
-        <div className="mt-4 grid grid-cols-3 gap-2">
-          {shots.map((s, i) => (
-            <div key={i} className="relative aspect-square overflow-hidden rounded-2xl bg-surface-2">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={s.preview} alt={`タグ写真${i + 1}`} className="h-full w-full object-cover" />
-              <button
-                type="button"
-                aria-label="削除"
-                onClick={() => setShots((xs) => xs.filter((_, j) => j !== i))}
-                className="absolute right-1 top-1 h-7 w-7 rounded-full bg-black/60 text-sm text-white"
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-          {shots.length < 3 && (
-            <button
-              type="button"
-              onClick={() => inputRef.current?.click()}
-              className="flex aspect-square flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-line text-muted"
-            >
-              <span className="text-2xl">📷</span>
-              <span className="text-xs">{shots.length ? "追加" : "撮影 / 選択"}</span>
-            </button>
-          )}
-        </div>
-        <input ref={inputRef} type="file" accept="image/*" capture="environment" multiple hidden onChange={(e) => onFiles(e.target.files)} />
-
-        {error && <p className="mt-3 rounded-2xl bg-red-500/10 p-3 text-sm text-red-600">{error}</p>}
-
-        <Button className="mt-5 w-full" disabled={!shots.length || status === "analyzing"} onClick={analyze}>
-          {status === "analyzing"
-            ? progress
-              ? `${progress.label}… ${progress.pct}%`
-              : "読み取り中…"
-            : "タグを読み取る"}
-        </Button>
-        <Button variant="ghost" className="mt-2 w-full" onClick={() => setStatus("review")}>
-          写真なしで手入力する
-        </Button>
-      </div>
-    );
+    if (photo) await savePhoto(id, photo).catch(() => toast("写真を保存できませんでした", "error"));
+    toast("クローゼットに追加しました");
+    router.push("/wardrobe/");
   }
 
   const subs = SUB_CATEGORIES.filter((s) => s.category === form.category);
+  const color = form.color ? colorById(form.color) : null;
 
   return (
-    <div className="space-y-3">
-      <h1 className="px-1 text-2xl font-black">内容を確認</h1>
-      {meta && (
-        <div className="rounded-2xl bg-surface-2 p-3 text-xs leading-relaxed">
-          <b>{meta.found.length ? `読み取れた項目: ${meta.found.join("・")}` : "文字をうまく読み取れませんでした"}</b>
-          <br />
-          洗濯表示の記号とアイテムの種類は読み取れないので、タグを見ながらタップしてください。色も選んでください。
-          <details className="mt-1">
-            <summary className="cursor-pointer">読み取った文字を見る</summary>
-            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-bg p-2 text-[11px]">{meta.text.trim() || "（なし）"}</pre>
-          </details>
-        </div>
-      )}
+    <div className="space-y-4">
+      {cropFile && <TagCropper file={cropFile} onCancel={() => setCropFile(null)} onDone={onCropped} />}
 
-      <Card className="space-y-3">
-        <label className="block">
-          <span className="text-xs font-bold text-muted">ブランド</span>
+      {/* ① 服全体の写真 */}
+      <Card>
+        <StepTitle n={1} title="服全体の写真" hint="任意。写真から色を自動で判定します" />
+        {photo ? (
+          <div className="mt-3 flex items-center gap-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={photo} alt="登録する服の写真" className="h-28 w-28 rounded-2xl object-cover" />
+            <div className="min-w-0 flex-1 space-y-2">
+              {color && (
+                <p className="flex items-center gap-2 text-base">
+                  <span className="inline-block h-6 w-6 rounded-full border border-line" style={{ background: color.hex }} />
+                  <b>{color.label}</b>
+                  {form.colorAuto && <span className="text-sm text-muted">（自動判定）</span>}
+                </p>
+              )}
+              <Button variant="ghost" className="w-full" onClick={() => photoInput.current?.click()}>
+                撮り直す
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Button variant="ghost" className="mt-3 w-full !min-h-16 text-lg" onClick={() => photoInput.current?.click()}>
+            👕 服全体を撮る
+          </Button>
+        )}
+        <input ref={photoInput} type="file" accept="image/*" capture="environment" hidden onChange={(e) => (onPhoto(e.target.files?.[0]), (e.target.value = ""))} />
+      </Card>
+
+      {/* ② タグの読み取り */}
+      <Card>
+        <StepTitle n={2} title="タグを読み取る" hint="任意。素材・サイズ・ブランド・洗濯の注意書きを自動で入力します" />
+        <div className="mt-3 grid gap-2">
+          <Button variant="ghost" className="!min-h-16 text-lg" disabled={!!reading} onClick={() => tagInput.current?.click()}>
+            {reading ? `${reading.label}… ${reading.pct}%` : "📷 タグを撮って読む"}
+          </Button>
+          <Button variant="ghost" className="!min-h-16 text-lg" disabled={!!reading} onClick={() => setPasteOpen((o) => !o)}>
+            📋 Galaxyで読んだ文字を貼り付け
+          </Button>
+        </div>
+        <input
+          ref={tagInput}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = "";
+            if (f) setCropFile(f);
+          }}
+        />
+
+        {pasteOpen && (
+          <div className="mt-3 space-y-2">
+            <Notice>
+              <b>Galaxyのテキスト抽出の使い方</b>
+              <ol className="mt-1 list-decimal space-y-0.5 pl-5">
+                <li>カメラでタグを撮るか、ギャラリーでタグの写真を開く</li>
+                <li>画面に出る「T」（テキストを抽出）ボタンを押す</li>
+                <li>「すべて選択」→「コピー」</li>
+                <li>下の欄を長押しして貼り付け</li>
+              </ol>
+              <span className="text-muted">※ 機種やOSのバージョンによって表示が異なります</span>
+            </Notice>
+            <textarea
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+              rows={5}
+              placeholder="ここに貼り付け（例: 綿 60% ポリエステル 40% …）"
+              className="w-full rounded-2xl border-2 border-line bg-bg p-3 text-base"
+            />
+            <Button className="w-full" disabled={!pasteText.trim()} onClick={onPaste}>
+              この文字から読み取る
+            </Button>
+          </div>
+        )}
+
+        {error && (
+          <div className="mt-3">
+            <Notice tone="error">{error}</Notice>
+          </div>
+        )}
+        {logs.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {logs.map((l, i) => (
+              <Notice key={i} tone={l.found.length ? "success" : "warn"}>
+                <b>{l.source === "paste" ? "貼り付けた文字" : `タグ写真 ${logs.filter((x, j) => x.source === "ocr" && j <= i).length}枚目`}</b>：
+                {l.found.length ? `${l.found.join("・")}を読み取りました` : "読み取れませんでした。文字の部分だけを囲んで撮り直すか、Galaxyの貼り付けをお試しください"}
+                <details className="mt-1">
+                  <summary className="cursor-pointer text-muted">読み取った文字を見る</summary>
+                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-bg p-2 text-sm">{l.text.trim() || "（なし）"}</pre>
+                </details>
+              </Notice>
+            ))}
+            <p className="px-1 text-sm text-muted">別のタグ（洗濯表示など）も続けて読むと、空いている欄が埋まります。</p>
+          </div>
+        )}
+      </Card>
+
+      {/* ③ 内容の確認 */}
+      <Card className="space-y-5">
+        <StepTitle n={3} title="内容を確認して保存" hint="違うところはタップで直してください" />
+
+        <Field label="ブランド">
           <input
             value={form.brandName}
             onChange={(e) => set("brandName", e.target.value)}
-            className="mt-1 w-full rounded-xl border border-line bg-bg px-3 py-2.5 text-base"
+            className="w-full rounded-2xl border-2 border-line bg-bg px-4 py-3 text-base"
             placeholder="例: UNIQLO"
             list="brand-options"
           />
@@ -227,134 +272,164 @@ export function AddItemFlow({ brands }: { brands: BrandRef[] }) {
               <option key={b.name} value={b.name} />
             ))}
           </datalist>
-          {form.brandName && (
-            <span className="mt-1 block text-[11px] text-muted">
-              {brands.some((b) => b.name === form.brandName) ? "✓ 登録済みのブランド" : "新しいブランド（価格帯は標準として扱います）"}
-            </span>
-          )}
-        </label>
-        <label className="block">
-          <span className="text-xs font-bold text-muted">アイテム名</span>
+        </Field>
+
+        <Field label="アイテム名（任意）">
           <input
             value={form.name}
             onChange={(e) => set("name", e.target.value)}
-            className="mt-1 w-full rounded-xl border border-line bg-bg px-3 py-2.5 text-base"
+            className="w-full rounded-2xl border-2 border-line bg-bg px-4 py-3 text-base"
             placeholder="例: オックスフォードシャツ"
           />
-        </label>
-      </Card>
+        </Field>
 
-      <Card>
-        <div className="text-xs font-bold text-muted">カテゴリ</div>
-        <div className="no-scrollbar -mx-4 mt-2 flex gap-1.5 overflow-x-auto px-4">
-          {CATEGORIES.map((c) => (
-            <Chip
-              key={c}
-              active={form.category === c}
-              onClick={() => setForm((f) => ({ ...f, category: c, subCategory: SUB_CATEGORIES.find((s) => s.category === c)!.id }))}
-            >
-              {CATEGORY_LABEL[c]}
-            </Chip>
-          ))}
-        </div>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {subs.map((s) => (
-            <Chip key={s.id} active={form.subCategory === s.id} onClick={() => set("subCategory", s.id)} className="text-xs">
-              {s.label}
-            </Chip>
-          ))}
-        </div>
-      </Card>
+        <Field label="カテゴリ" required>
+          <div className="flex flex-wrap gap-2">
+            {CATEGORIES.map((c) => (
+              <Chip key={c} active={form.category === c} onClick={() => setForm((f) => ({ ...f, category: c, subCategory: SUB_CATEGORIES.find((s) => s.category === c)!.id }))}>
+                {CATEGORY_LABEL[c]}
+              </Chip>
+            ))}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {subs.map((s) => (
+              <Chip key={s.id} active={form.subCategory === s.id} onClick={() => set("subCategory", s.id)}>
+                {s.label}
+              </Chip>
+            ))}
+          </div>
+        </Field>
 
-      <Card>
-        <div className="text-xs font-bold text-muted">
-          色 <span className="text-accent">*</span>
-        </div>
-        <div className="mt-2 grid grid-cols-5 gap-2">
-          {COLOR_FAMILIES.map((c) => (
-            <button key={c.id} type="button" onClick={() => set("color", c.id)} className="flex flex-col items-center gap-1">
-              <span
-                className={`flex h-10 w-10 items-center justify-center rounded-full ${form.color === c.id ? "ring-3 ring-accent ring-offset-2 ring-offset-surface" : ""}`}
-                style={{ background: c.hex, color: inkOn(c.hex), boxShadow: "0 0 0 1px rgb(0 0 0 / 0.1) inset" }}
+        <Field label="色" required hint={form.colorAuto ? "写真から自動で選びました。違う場合はタップで直してください" : undefined}>
+          <div className="grid grid-cols-5 gap-2">
+            {COLOR_FAMILIES.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                aria-pressed={form.color === c.id}
+                onClick={() => setForm((f) => ({ ...f, color: c.id, colorAuto: false }))}
+                className="flex min-h-16 flex-col items-center gap-1"
               >
-                {form.color === c.id ? "✓" : ""}
-              </span>
-              <span className="text-[10px] text-muted">{c.label}</span>
-            </button>
-          ))}
-        </div>
-        <div className="mt-4 text-xs font-bold text-muted">サイズ感</div>
-        <div className="mt-2 flex gap-1.5">
-          {FITS.map((f) => (
-            <Chip key={f.id} active={form.fit === f.id} onClick={() => set("fit", f.id)}>
-              {f.label}
-            </Chip>
-          ))}
+                <span
+                  className={`flex h-11 w-11 items-center justify-center rounded-full text-lg font-bold ${form.color === c.id ? "ring-4 ring-accent ring-offset-2 ring-offset-surface" : ""}`}
+                  style={{ background: c.hex, color: inkOn(c.hex), boxShadow: "0 0 0 1px rgb(0 0 0 / 0.15) inset" }}
+                >
+                  {form.color === c.id ? "✓" : ""}
+                </span>
+                <span className="text-xs">{c.label}</span>
+              </button>
+            ))}
+          </div>
+        </Field>
+
+        <Field label="購入した時期" hint="買い替え時期の目安に使います">
+          <div className="flex flex-wrap gap-2">
+            {PURCHASE_APPROX.map((p) => (
+              <Chip key={p.id} active={form.purchasedApprox === p.id} onClick={() => set("purchasedApprox", p.id)}>
+                {p.label}
+              </Chip>
+            ))}
+          </div>
+        </Field>
+
+        <Field label="サイズ感・サイズ表記">
+          <div className="flex flex-wrap gap-2">
+            {FITS.map((f) => (
+              <Chip key={f.id} active={form.fit === f.id} onClick={() => set("fit", f.id)}>
+                {f.label}
+              </Chip>
+            ))}
+          </div>
           <input
             value={form.size}
             onChange={(e) => set("size", e.target.value)}
-            className="min-w-0 flex-1 rounded-full border border-line bg-bg px-3 text-sm"
-            placeholder="サイズ表記"
+            className="mt-2 w-full rounded-2xl border-2 border-line bg-bg px-4 py-3 text-base"
+            placeholder="サイズ表記（例: M、W31 L32）"
             aria-label="サイズ表記"
           />
-        </div>
+        </Field>
+
+        <Field label="素材">
+          {form.materials.length === 0 && <p className="mb-2 text-sm text-muted">タグを読むと自動で入ります。手で追加もできます。</p>}
+          <ul className="space-y-2">
+            {form.materials.map((m, i) => (
+              <li key={i} className="flex items-center gap-2">
+                <input
+                  value={m.name}
+                  onChange={(e) => set("materials", form.materials.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
+                  className="min-w-0 flex-1 rounded-2xl border-2 border-line bg-bg px-3 py-3 text-base"
+                  aria-label="素材名"
+                />
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={m.pct}
+                  onChange={(e) => set("materials", form.materials.map((x, j) => (j === i ? { ...x, pct: Number(e.target.value) } : x)))}
+                  className="w-20 rounded-2xl border-2 border-line bg-bg px-2 py-3 text-right text-base"
+                  aria-label="割合"
+                />
+                <span className="text-base">%</span>
+                <button
+                  type="button"
+                  className="flex h-11 w-11 items-center justify-center rounded-full text-lg text-muted"
+                  aria-label="この素材を削除"
+                  onClick={() => set("materials", form.materials.filter((_, j) => j !== i))}
+                >
+                  ✕
+                </button>
+              </li>
+            ))}
+          </ul>
+          <Button variant="ghost" className="mt-2 w-full" onClick={() => set("materials", [...form.materials, { name: "", pct: 0 }])}>
+            ＋ 素材を追加
+          </Button>
+        </Field>
+
+        <Field label="洗濯表示" hint="記号は読み取れないので、タグを見ながらタップしてください">
+          <div className="flex flex-wrap gap-2">
+            {CARE_SYMBOLS.map((c) => (
+              <Chip
+                key={c.id}
+                active={form.careSymbols.includes(c.id)}
+                onClick={() => set("careSymbols", form.careSymbols.includes(c.id) ? form.careSymbols.filter((x) => x !== c.id) : [...form.careSymbols, c.id])}
+              >
+                {c.label}
+              </Chip>
+            ))}
+          </div>
+        </Field>
       </Card>
 
-      <Card>
-        <div className="text-xs font-bold text-muted">素材</div>
-        <ul className="mt-2 space-y-1.5">
-          {form.materials.map((m, i) => (
-            <li key={i} className="flex items-center gap-2">
-              <input
-                value={m.name}
-                onChange={(e) => set("materials", form.materials.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
-                className="min-w-0 flex-1 rounded-xl border border-line bg-bg px-3 py-2 text-base"
-                aria-label="素材名"
-              />
-              <input
-                type="number"
-                inputMode="numeric"
-                value={m.pct}
-                onChange={(e) => set("materials", form.materials.map((x, j) => (j === i ? { ...x, pct: Number(e.target.value) } : x)))}
-                className="w-16 rounded-xl border border-line bg-bg px-2 py-2 text-right text-base"
-                aria-label="割合"
-              />
-              <span className="text-sm text-muted">%</span>
-              <button type="button" className="px-1 text-muted" aria-label="素材を削除" onClick={() => set("materials", form.materials.filter((_, j) => j !== i))}>
-                ✕
-              </button>
-            </li>
-          ))}
-        </ul>
-        <button type="button" className="mt-2 text-xs font-bold text-accent" onClick={() => set("materials", [...form.materials, { name: "", pct: 0 }])}>
-          ＋ 素材を追加
-        </button>
-
-        <div className="mt-4 text-xs font-bold text-muted">洗濯表示</div>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {CARE_SYMBOLS.map((c) => (
-            <Chip
-              key={c.id}
-              className="text-xs"
-              active={form.careSymbols.includes(c.id)}
-              onClick={() =>
-                set("careSymbols", form.careSymbols.includes(c.id) ? form.careSymbols.filter((x) => x !== c.id) : [...form.careSymbols, c.id])
-              }
-            >
-              {c.icon} {c.label}
-            </Chip>
-          ))}
-        </div>
-      </Card>
-
-      <div className="sticky bottom-20 grid grid-cols-[auto_1fr] gap-2 bg-bg py-2">
-        <Button variant="ghost" onClick={() => setStatus("idle")}>
-          撮り直す
-        </Button>
-        <Button disabled={!form.color} onClick={save}>
-          {form.color ? "クローゼットに追加" : "色を選んでください"}
+      <div className="sticky bottom-24 z-10 bg-bg/95 py-2 backdrop-blur">
+        <Button className="w-full !min-h-14 text-lg" disabled={!form.color} onClick={save}>
+          {form.color ? "✓ クローゼットに追加" : "色を選ぶと保存できます"}
         </Button>
       </div>
+    </div>
+  );
+}
+
+function StepTitle({ n, title, hint }: { n: number; title: string; hint?: string }) {
+  return (
+    <div>
+      <h2 className="flex items-center gap-2 text-lg font-black">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-base text-accent-ink">{n}</span>
+        {title}
+      </h2>
+      {hint && <p className="mt-1 text-sm text-muted">{hint}</p>}
+    </div>
+  );
+}
+
+function Field({ label, hint, required, children }: { label: string; hint?: string; required?: boolean; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="mb-2">
+        <span className="text-base font-bold">{label}</span>
+        {required && <span className="ml-1 rounded bg-accent/15 px-1.5 py-0.5 text-xs font-bold text-accent">必須</span>}
+        {hint && <p className="mt-0.5 text-sm text-muted">{hint}</p>}
+      </div>
+      {children}
     </div>
   );
 }

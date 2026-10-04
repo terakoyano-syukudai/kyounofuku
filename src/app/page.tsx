@@ -9,8 +9,9 @@ import { OutfitColorBlocks } from "@/components/today/OutfitColorBlocks";
 import { ShoppingSuggestions } from "@/components/today/ShoppingSuggestions";
 import { TimelineAdvice, WeatherStrip } from "@/components/today/TimelineAdvice";
 import { WearButton } from "@/components/today/WearButton";
-import { Card, SectionTitle } from "@/components/ui";
+import { Card, Notice, SectionTitle } from "@/components/ui";
 import { proposeDay } from "@/lib/engine";
+import { explainOutfit } from "@/lib/engine/advice";
 import { outfitItems } from "@/lib/engine/outfit";
 import { allBrands, getDayPlanOrLatest, listItems, listScenes, requestPersistence, toUser, useAppData } from "@/lib/store";
 import { getDayWeather, todayISO, weatherLabel, type DayWeather } from "@/lib/weather";
@@ -37,7 +38,7 @@ function Today() {
   const lon = data?.user.lon ?? 139.77;
 
   useEffect(() => {
-    if (data && !data.user.onboarded) router.replace("/onboarding");
+    if (data && !data.user.onboarded) router.replace("/onboarding/");
   }, [data, router]);
 
   useEffect(() => {
@@ -66,13 +67,13 @@ function Today() {
       today,
       altIndex: alt,
     });
-    return { proposal, items, inherited };
+    return { proposal, items, inherited, reasons: explainOutfit(proposal.ctx, proposal.outfit) };
   }, [data, weather, date, today, alt]);
 
   if (!data || !data.user.onboarded) return <Loading />;
   if (!view || !weather) return <Loading label="天気を取得しています…" />;
 
-  const { proposal, items, inherited } = view;
+  const { proposal, items, inherited, reasons } = view;
   const ids = outfitItems(proposal.outfit).map((i) => i.id);
   const wornIds = date === today ? data.wearLogs[today] : undefined;
   const worn = !!wornIds && wornIds.length === ids.length && ids.every((id) => wornIds.includes(id));
@@ -82,64 +83,62 @@ function Today() {
 
   return (
     <div>
-      <header className="flex items-center justify-between px-1">
-        <div className="flex gap-1 rounded-full bg-surface p-1 text-xs font-bold">
-          <Link href="/" className={`rounded-full px-3 py-1.5 ${date === today ? "bg-ink text-bg" : "text-muted"}`}>
-            今日
-          </Link>
-          <Link href={`/?date=${tomorrow}`} className={`rounded-full px-3 py-1.5 ${date === tomorrow ? "bg-ink text-bg" : "text-muted"}`}>
-            明日
+      {/* 日付・天気・エリア */}
+      <header className="px-1">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex gap-1 rounded-full border-2 border-line bg-surface p-1" role="tablist" aria-label="日付">
+            {[
+              { d: today, label: "今日", href: "/" },
+              { d: tomorrow, label: "明日", href: `/?date=${tomorrow}` },
+            ].map((t) => (
+              <Link
+                key={t.d}
+                href={t.href}
+                role="tab"
+                aria-selected={date === t.d}
+                className={`flex min-h-11 min-w-16 items-center justify-center rounded-full px-4 text-base font-bold ${date === t.d ? "bg-ink text-bg" : "text-muted"}`}
+              >
+                {t.label}
+              </Link>
+            ))}
+          </div>
+          <Link href="/settings/" className="flex min-h-11 items-center rounded-full border-2 border-line bg-surface px-3 text-sm font-bold">
+            📍{data.user.areaName ?? "未設定"}
           </Link>
         </div>
-        <Link href="/settings" className="text-xs text-muted">
-          📍{data.user.areaName ?? "未設定"}
-        </Link>
+        <p className="mt-3 text-base">
+          <b>{dateLabel}</b>　{w.emoji} {w.label}　<b>{Math.round(weather.max)}°</b> / {Math.round(weather.min)}°
+          {weather.source === "fallback" && <span className="ml-2 rounded bg-warn/20 px-1.5 text-sm text-warn">推定値</span>}
+        </p>
       </header>
 
-      {/* ── 今日の結論 ── */}
-      <Card className="mt-3 p-5">
-        <div className="flex items-center gap-2 text-xs text-muted">
-          <span>{dateLabel}</span>
-          <span>
-            {w.emoji} {w.label} {Math.round(weather.max)}° / {Math.round(weather.min)}°
-          </span>
-          {weather.source === "fallback" && <span className="rounded bg-warn/20 px-1.5 text-warn">推定値</span>}
-        </div>
+      {/* ① 今日のコーデ */}
+      <SectionTitle icon="①">{date === today ? "今日" : "明日"}のおすすめコーデ</SectionTitle>
+      <Card className="p-5">
         {items.length === 0 ? (
-          <div className="py-4">
-            <h1 className="text-2xl font-black leading-tight">まずは手持ちの服を登録しましょう</h1>
-            <p className="mt-2 text-sm text-muted">タグを撮るだけで、ブランドや素材を読み取ります。</p>
-            <div className="mt-4 grid gap-2">
-              <Link href="/wardrobe/add" className="rounded-2xl bg-accent py-3 text-center text-sm font-bold text-accent-ink">
-                📷 タグを撮って登録
-              </Link>
-              <SampleButton />
-            </div>
+          <div className="space-y-3">
+            <p className="text-xl font-black leading-tight">まずは手持ちの服を登録しましょう</p>
+            <p className="text-base text-muted">服の写真やタグを撮ると、色や素材を自動で入力します。</p>
+            <Link href="/wardrobe/add/" className="flex min-h-14 items-center justify-center rounded-2xl bg-accent text-lg font-bold text-accent-ink">
+              ＋ 服を登録する
+            </Link>
+            <SampleButton />
           </div>
         ) : (
           <>
-            <h1 className="mt-2 text-[22px] font-black leading-snug">{proposal.headline}</h1>
+            <p className="text-2xl font-black leading-snug">{proposal.headline}</p>
             <div className="mt-4">
               <OutfitColorBlocks outfit={proposal.outfit} />
             </div>
-            {proposal.outfit.reasons.length > 0 && (
-              <ul className="mt-4 flex flex-wrap gap-1.5">
-                {proposal.outfit.reasons.slice(0, 3).map((r) => (
-                  <li key={r} className="rounded-full bg-surface-2 px-2.5 py-1 text-[11px]">
-                    {r}
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="mt-4 grid grid-cols-[1fr_auto] gap-2">
+            <div className="mt-5 grid grid-cols-2 gap-2">
               {date === today ? (
                 <WearButton date={today} itemIds={ids} worn={worn} />
               ) : (
-                <div className="rounded-2xl bg-surface-2 py-3 text-center text-xs text-muted">明日の予報で提案しています</div>
+                <div className="flex min-h-[52px] items-center justify-center rounded-2xl bg-surface-2 text-sm text-muted">明日の予報で提案しています</div>
               )}
               {proposal.alternatives.length > 1 && (
-                <Link href={altHref} className="rounded-2xl border border-line px-4 py-3 text-sm font-bold">
-                  別の案 {alt + 1}/{proposal.alternatives.length}
+                <Link href={altHref} className="flex min-h-[52px] items-center justify-center rounded-2xl border-2 border-line px-3 text-base font-bold">
+                  🔄 別の案 {alt + 1}/{proposal.alternatives.length}
                 </Link>
               )}
             </div>
@@ -147,23 +146,48 @@ function Today() {
         )}
       </Card>
 
+      {reasons.length > 0 && (
+        <Card className="mt-3">
+          <p className="mb-2 text-base font-black">💡 なぜこのコーデ？</p>
+          <ul className="space-y-2.5">
+            {reasons.map((r) => (
+              <li key={r.title} className="flex gap-2.5 text-base leading-relaxed">
+                <span aria-hidden className="text-xl leading-6">
+                  {r.icon}
+                </span>
+                <span>
+                  <b>{r.title}</b>：{r.text}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
+      {/* ② 1日の流れ */}
       <SectionTitle
+        icon="②"
+        description={inherited ? "前回の予定を使っています。今日の予定に合わせて変更できます" : "時間帯ごとの気温と、服の調整のしかたです"}
         action={
-          <Link href={`/plan?date=${date}`} className="text-xs font-bold text-accent">
+          <Link href={`/plan/?date=${date}`} className="flex min-h-11 items-center rounded-full border-2 border-accent px-3 text-sm font-bold text-accent">
             予定を変更
           </Link>
         }
       >
-        1日のタイムライン{inherited && <span className="ml-1 font-normal">（前回の予定を流用中）</span>}
+        1日の流れ
       </SectionTitle>
       <WeatherStrip advice={proposal.advice} />
       <div className="mt-3">
         <TimelineAdvice advice={proposal.advice} />
       </div>
 
+      {/* ③ 買い足し */}
       {items.length > 0 && (
         <>
-          <SectionTitle>買い足すなら</SectionTitle>
+          <SectionTitle icon="③" description="手持ちでは足りないものを、予算内で探しました">
+            買い足すなら
+          </SectionTitle>
+          {proposal.gaps.length === 0 && <Notice tone="success">今日は手持ちの服で十分です。買い足しは必要ありません。</Notice>}
           <ShoppingSuggestions
             gaps={proposal.gaps}
             shop={proposal.shop}

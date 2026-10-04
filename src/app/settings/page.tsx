@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Loading } from "@/components/Loading";
 import { BackupSetting } from "@/components/settings/BackupSetting";
 import { LocationSetting } from "@/components/settings/LocationSetting";
-import { Card, SectionTitle } from "@/components/ui";
+import { Card, PageHeader, SectionTitle } from "@/components/ui";
 import { BUDGET_CATEGORIES, CATEGORY_LABEL, yen } from "@/lib/constants";
 import { rakutenEnabled } from "@/lib/shop/rakuten";
 import { useAppData } from "@/lib/store";
@@ -15,7 +15,7 @@ export default function SettingsPage() {
   const { user } = data;
   return (
     <div>
-      <h1 className="px-1 text-2xl font-black">設定</h1>
+      <PageHeader title="設定" description="天気のエリア、体型・好み・予算、データのバックアップを管理します。" />
 
       <SectionTitle>天気のエリア</SectionTitle>
       <Card>
@@ -24,7 +24,7 @@ export default function SettingsPage() {
 
       <SectionTitle
         action={
-          <Link href="/onboarding" className="text-xs font-bold text-accent">
+          <Link href="/onboarding/" className="flex min-h-11 items-center rounded-full border-2 border-accent px-4 text-sm font-bold text-accent">
             編集
           </Link>
         }

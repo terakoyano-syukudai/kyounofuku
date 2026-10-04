@@ -57,9 +57,22 @@ export type WardrobeItem = {
   formality: number;
   breathability: number;
   lastWornAt: string | null;
-  tagImages: string[];
+  purchasedApprox: PurchaseApprox; // 購入時期（おおよそ）
+  purchasedAt: string | null; // 購入時期から推定した日付（YYYY-MM-DD）。わからなければ null
+  manualWears: string[]; // 詳細画面の「今日着た」で記録した日付
+  hasPhoto: boolean; // 服全体の写真（端末内の IndexedDB に保存）
   aiRaw: unknown | null;
 };
+
+export const PURCHASE_APPROX = [
+  { id: "recent", label: "最近", monthsAgo: 0 },
+  { id: "this_year", label: "今年", monthsAgo: 4 },
+  { id: "1y", label: "1年くらい前", monthsAgo: 12 },
+  { id: "2_3y", label: "2〜3年前", monthsAgo: 30 },
+  { id: "older", label: "それ以上前", monthsAgo: 48 },
+  { id: "unknown", label: "わからない", monthsAgo: null },
+] as const;
+export type PurchaseApprox = (typeof PURCHASE_APPROX)[number]["id"];
 
 export type Scene = {
   id: string;
